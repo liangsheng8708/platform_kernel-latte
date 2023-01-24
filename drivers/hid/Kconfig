@@ -468,7 +468,7 @@ config HID_VIEWSONIC
 	help
 	  Support for ViewSonic/Signotec PD1011 signature pad.
 
-config HID_XIAOMI:
+config HID_XIAOMI
 	tristate "Xiaomi"
 	depends on HID
 	help
