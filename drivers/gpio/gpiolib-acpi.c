@@ -32,9 +32,16 @@ MODULE_PARM_DESC(ignore_wake,
 		 "controller@pin combos on which to ignore the ACPI wake flag "
 		 "ignore_wake=controller@pin[,controller@pin[,...]]");
 
+static char *ignore;
+module_param(ignore, charp, 0444);
+MODULE_PARM_DESC(ignore,
+		 "controller@pin combos which are to be ignored from _AEI lists "
+		 "ignore=controller@pin[,controller@pin[,...]]");		 
+
 struct acpi_gpiolib_dmi_quirk {
 	bool no_edge_events_on_boot;
 	char *ignore_wake;
+	char *ignore;
 };
 
 /**
@@ -321,13 +328,15 @@ static struct gpio_desc *acpi_request_own_gpiod(struct gpio_chip *chip,
 	return desc;
 }
 
-static bool acpi_gpio_in_ignore_list(const char *controller_in, int pin_in)
+static bool acpi_gpio_in_ignore_list(const char *ignore_list,
+				     const char *controller_in,
+				     int pin_in)
 {
 	const char *controller, *pin_str;
 	int len, pin;
 	char *endp;
 
-	controller = ignore_wake;
+	controller = ignore_list;
 	while (controller) {
 		pin_str = strchr(controller, '@');
 		if (!pin_str)
@@ -351,8 +360,8 @@ static bool acpi_gpio_in_ignore_list(const char *controller_in, int pin_in)
 
 	return false;
 err:
-	pr_err_once("Error invalid value for gpiolib_acpi.ignore_wake: %s\n",
-		    ignore_wake);
+	pr_err_once("Error invalid value for gpiolib_acpi.ignore_xxx: %s\n",
+		    ignore_list);
 	return false;
 }
 
@@ -364,7 +373,7 @@ static bool acpi_gpio_irq_is_wake(struct device *parent,
 	if (agpio->wake_capable != ACPI_WAKE_CAPABLE)
 		return false;
 
-	if (acpi_gpio_in_ignore_list(dev_name(parent), pin)) {
+	if (acpi_gpio_in_ignore_list(ignore_wake, dev_name(parent), pin)) {
 		dev_info(parent, "Ignoring wakeup on pin %d\n", pin);
 		return false;
 	}
@@ -405,6 +414,11 @@ static acpi_status acpi_gpiochip_alloc_event(struct acpi_resource *ares,
 	}
 	if (!handler)
 		return AE_OK;
+
+	if (acpi_gpio_in_ignore_list(ignore, dev_name(chip->parent), pin)) {
+		dev_info(chip->parent, "Ignoring _AEI entry for pin %d\n", pin);
+		return AE_OK;
+	}	
 
 	desc = acpi_request_own_gpiod(chip, agpio, 0, "ACPI:Event");
 	if (IS_ERR(desc)) {
@@ -1572,6 +1586,19 @@ static const struct dmi_system_id gpiolib_acpi_quirks[] __initconst = {
 			.ignore_wake = "INT33FF:01@0",
 		},
 	},
+	{
+		/*
+		 * On the Xiaomi Mi Pad 2 we use native battery drivers, disable
+		 * the _AEI entry for the fuel-gauge IRQ.
+		 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Xiaomi Inc"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
+		},
+		.driver_data = &(struct acpi_gpiolib_dmi_quirk) {
+			.ignore = "INT33FF:03@52",
+		},
+	},
 	{} /* Terminating entry */
 };
 
@@ -1593,6 +1620,9 @@ static int __init acpi_gpio_setup_params(void)
 
 	if (ignore_wake == NULL && quirk && quirk->ignore_wake)
 		ignore_wake = quirk->ignore_wake;
+
+	if (ignore == NULL && quirk && quirk->ignore)
+		ignore = quirk->ignore;	
 
 	return 0;
 }

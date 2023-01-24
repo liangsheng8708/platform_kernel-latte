@@ -6,6 +6,7 @@
  *	Andrew F. Davis <afd@ti.com>
  */
 
+#include <linux/acpi.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -139,7 +140,10 @@ static int bq27xxx_battery_i2c_bulk_write(struct bq27xxx_device_info *di,
 static int bq27xxx_battery_i2c_probe(struct i2c_client *client,
 				     const struct i2c_device_id *id)
 {
+	const struct acpi_device_id *acpi_id = NULL;
+	struct device *dev = &client->dev;
 	struct bq27xxx_device_info *di;
+	unsigned long irqflags = 0;
 	int ret;
 	char *name;
 	int num;
@@ -151,17 +155,31 @@ static int bq27xxx_battery_i2c_probe(struct i2c_client *client,
 	if (num < 0)
 		return num;
 
-	name = devm_kasprintf(&client->dev, GFP_KERNEL, "%s-%d", id->name, num);
-	if (!name)
-		goto err_mem;
-
-	di = devm_kzalloc(&client->dev, sizeof(*di), GFP_KERNEL);
+	di = devm_kzalloc(dev, sizeof(*di), GFP_KERNEL);
 	if (!di)
 		goto err_mem;
 
+	if (id) {
+		di->chip = id->driver_data;
+	} else {
+		acpi_id = acpi_match_device(dev->driver->acpi_match_table, dev);
+		if (!acpi_id)
+			return -ENODEV;
+
+		irqflags = IRQF_TRIGGER_RISING;
+		di->chip = acpi_id->driver_data;
+	}
+
+	if (acpi_id && num == 0) {
+		name = "main-battery";
+	} else {
+		name = devm_kasprintf(dev, GFP_KERNEL, "%s-%d", id->name, num);
+		if (!name)
+			goto err_mem;
+	}	
+
 	di->id = num;
-	di->dev = &client->dev;
-	di->chip = id->driver_data;
+	di->dev = dev;
 	di->name = name;
 
 	di->bus.read = bq27xxx_battery_i2c_read;
@@ -179,13 +197,12 @@ static int bq27xxx_battery_i2c_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, di);
 
 	if (client->irq) {
-		ret = devm_request_threaded_irq(&client->dev, client->irq,
+		ret = devm_request_threaded_irq(dev, client->irq,
 				NULL, bq27xxx_battery_irq_handler_thread,
-				IRQF_ONESHOT,
+				irqflags | IRQF_ONESHOT,
 				di->name, di);
 		if (ret) {
-			dev_err(&client->dev,
-				"Unable to register IRQ %d error %d\n",
+			dev_err(dev, "Unable to register IRQ %d error %d\n",
 				client->irq, ret);
 			bq27xxx_battery_teardown(di);
 			goto err_failed;
@@ -292,10 +309,19 @@ static const struct of_device_id bq27xxx_battery_i2c_of_match_table[] = {
 MODULE_DEVICE_TABLE(of, bq27xxx_battery_i2c_of_match_table);
 #endif
 
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id bq27xxx_acpi_match[] = {
+	{ "TXN27520", BQ2752X },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, bq27xxx_acpi_match);
+#endif
+
 static struct i2c_driver bq27xxx_battery_i2c_driver = {
 	.driver = {
 		.name = "bq27xxx-battery",
 		.of_match_table = of_match_ptr(bq27xxx_battery_i2c_of_match_table),
+		.acpi_match_table = ACPI_PTR(bq27xxx_acpi_match),
 	},
 	.probe = bq27xxx_battery_i2c_probe,
 	.remove = bq27xxx_battery_i2c_remove,

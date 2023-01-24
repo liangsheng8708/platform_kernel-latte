@@ -71,6 +71,12 @@ static const struct override_status_id override_status_ids[] = {
 	PRESENT_ENTRY_HID("80860F09", "1", ATOM_SILVERMONT, {}),
 	PRESENT_ENTRY_HID("80862288", "1", ATOM_AIRMONT, {}),
 
+	/* The Xiaomi Mi Pad 2 uses PWM2 for touchkeys backlight control */
+	PRESENT_ENTRY_HID("80862289", "2", ATOM_AIRMONT, {
+		DMI_MATCH(DMI_SYS_VENDOR, "Xiaomi Inc"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
+	      }),
+
 	/*
 	 * The INT0002 device is necessary to clear wakeup interrupt sources
 	 * on Cherry Trail devices, without it we get nobody cared IRQ msgs.
@@ -166,7 +172,7 @@ bool acpi_device_override_status(struct acpi_device *adev, unsigned long long *s
 				continue;
 
 			if (!adev->pnp.unique_id ||
-			    strcmp(adev->pnp.unique_id, override_status_ids[i].uid))
+			strcmp(adev->pnp.unique_id, override_status_ids[i].uid))
 				continue;
 		}
 
